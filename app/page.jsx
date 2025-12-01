@@ -1,96 +1,29 @@
-"use client";
-
-import { useState } from "react";
-
-export default function HomePage() {
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      content: "Hola, soy AndreaGPT. ¿En qué te ayudo hoy?",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const newMessages = [
-      ...messages,
-      { role: "user", content: input.trim() },
-    ];
-
-    setMessages(newMessages);
-    setInput("");
-    setIsLoading(true);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Error ${res.status}`);
-      }
-
-      const data = await res.json();
-      const replyContent =
-        data.reply?.content ?? "Ups, algo salió mal hablando con el modelo.";
-
-      setMessages([
-        ...newMessages,
-        { role: "assistant", content: replyContent },
-      ]);
-    } catch (err) {
-      console.error(err);
-      setMessages([
-        ...newMessages,
-        {
-          role: "assistant",
-          content:
-            "No pude hablar con el modelo ahora mismo. Revisa tu OPENAI_API_KEY en Vercel.",
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
+export default function Home() {
   return (
-    <main>
-      <div className="chat-container">
-        <h1 className="chat-title">AndreaGPT.AI</h1>
+    <div style={{ padding: "40px", fontFamily: "sans-serif" }}>
+      <h1>AndreaGPT AI</h1>
+      <p>Tu chatbot ya está conectado. Prueba enviando un mensaje:</p>
 
-        <div className="messages">
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`message ${m.role === "user" ? "user" : "assistant"}`}
-            >
-              {m.content}
-            </div>
-          ))}
-          {isLoading && (
-            <div className="message assistant">
-              AndreaGPT está respondiendo…
-            </div>
-          )}
-        </div>
+      <form action="/api/chat" method="POST">
+        <textarea
+          name="messages"
+          placeholder="Escribe tu mensaje para AndreaGPT..."
+          rows={5}
+          style={{ width: "100%", padding: "10px", marginTop: "10px" }}
+        ></textarea>
 
-        <form className="input-row" onSubmit={handleSubmit}>
-          <input
-            placeholder="Escribe tu mensaje…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-          <button type="submit" disabled={!input.trim() || isLoading}>
-            Enviar
-          </button>
-        </form>
-      </div>
-    </main>
+        <button
+          type="submit"
+          style={{
+            marginTop: "20px",
+            padding: "10px 20px",
+            background: "black",
+            color: "white",
+          }}
+        >
+          Enviar
+        </button>
+      </form>
+    </div>
   );
 }
