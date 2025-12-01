@@ -1,17 +1,7 @@
 export default function Home() {
   return (
-    <div
-      style={{
-        height: "100vh",
-        width: "100%",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        fontSize: "28px",
-        fontWeight: "bold"
-      }}
-    >
-      AndreaGPT está funcionando 🚀
+    <div style={{ padding: "40px", fontSize: "28px" }}>
+      AndreaGPT.AI está funcionando 🚀
     </div>
   );
 }
