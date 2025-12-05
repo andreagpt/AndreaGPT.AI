@@ -42,9 +42,6 @@ CÓMO RESPONDES:
 - JAMÁS inventes datos falsos.
 - Si no tienes suficiente información, pide más detalles.
 
-OBJETIVO:
-Que el usuario sienta que realmente está hablando con Andrea Lancioni — su tono, su energía y su estilo.
-
 ==================== ✅ FORMATO DEAL CALCULATOR (OBLIGATORIO) ✅ ====================
 Cuando el usuario te mande un link de Zillow O datos de una propiedad, responde SIEMPRE con:
 
@@ -84,7 +81,7 @@ Cuando el usuario te mande un link de Zillow O datos de una propiedad, responde 
 - Punto mínimo de renta para quedar en $0 cash flow
 
 5) **Recomendación de Andrea (pasos)**
-- 3 próximos pasos concretos (por ejemplo: pedir seller disclosures, rent comps, taxes exactos, insurance quote)
+- 3 próximos pasos concretos
 - 3 preguntas que necesito para afinar (solo si faltan datos)
 
 REGLAS:
@@ -96,7 +93,13 @@ Listo. Comienza a responder como AndreaGPT.
 `;
 // ===============================================================
 
-// ---------- Zillow helpers (best effort) ----------
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function extractUrls(text = "") {
   const re = /(https?:\/\/[^\s]+)/g;
   return text.match(re) ?? [];
@@ -111,151 +114,91 @@ function isZillowUrl(url) {
   }
 }
 
-async function fetchZillowHtmlBestEffort(url) {
-  // Zillow suele bloquear bots. Esto es best-effort.
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
-  });
-
-  if (!res.ok) return { ok: false, status: res.status, html: "" };
-
-  const html = await res.text();
-  const snippet = html.slice(0, 12000);
-
-  const looksBlocked =
-    /captcha|px-captcha|access denied|blocked|robot|unusual traffic/i.test(
-      snippet
-    );
-
-  if (looksBlocked) return { ok: false, status: 403, html: "" };
-
-  return { ok: true, status: res.status, html: snippet };
-}
-// -----------------------------------------------
-
-function json(resBody, status = 200) {
-  return new Response(JSON.stringify(resBody), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+function getTextFromMessage(msg) {
+  if (!msg) return "";
+  if (typeof msg.content === "string") return msg.content;
+  // si viene en formato parts (por compatibilidad)
+  if (Array.isArray(msg.parts)) {
+    return msg.parts
+      .filter((p) => p?.type === "text" && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("\n");
+  }
+  return "";
 }
 
 export async function POST(req) {
   try {
     const body = await req.json();
 
-    // Aceptamos:
-    // - body.messages (array)  ✅ recomendado
-    // - o el formato viejo { message } (por si acaso)
-    const userMessages = Array.isArray(body.messages)
+    const userMessagesRaw = Array.isArray(body.messages)
       ? body.messages
       : body.message
         ? [body.message]
         : [];
 
-    // Detectar Zillow link en el último mensaje del usuario (si existe)
-    const lastUser = [...userMessages].reverse().find((m) => m?.role === "user");
-    const lastText =
-      typeof lastUser?.content === "string" ? lastUser.content : "";
+    // Normalizamos a {role, content} string (evita errores raros)
+    const userMessages = userMessagesRaw
+      .map((m) => ({
+        role: m?.role || "user",
+        content: getTextFromMessage(m),
+      }))
+      .filter((m) => typeof m.content === "string");
+
+    const lastUser = [...userMessages].reverse().find((m) => m.role === "user");
+    const lastText = lastUser?.content ?? "";
     const urls = extractUrls(lastText);
     const zillowUrl = urls.find(isZillowUrl);
 
-    // Si hay Zillow URL, intentamos traer HTML para contexto
-    let zillowContext = "";
+    // ✅ Si detecta Zillow, NO intentamos fetch. Solo pedimos inputs
     if (zillowUrl) {
-      try {
-        const fetched = await fetchZillowHtmlBestEffort(zillowUrl);
+      const replyText =
+        `Muchacha, vi tu link de Zillow ✅\n` +
+        `\n` +
+        `Ojo con esto: Zillow casi siempre bloquea que yo “lea” la página automática (captcha). ` +
+        `Pero igual te hago el **deal calculator** perfecto si me pegas estos numeritos.\n\n` +
+        `**Del listing (copy/paste):**\n` +
+        `1) Address\n` +
+        `2) Precio\n` +
+        `3) Beds / Baths / Sqft\n` +
+        `4) Rent Zestimate (o renta esperada)\n` +
+        `5) Taxes anual\n` +
+        `6) HOA mensual (si aplica)\n` +
+        `7) Condición / rehab (si el listing dice algo)\n\n` +
+        `**Y dime tú:**\n` +
+        `- Down payment % (20% o 25% si no sabes)\n` +
+        `- Interest rate estimado (si no sabes, 7.5% por ahora)\n\n` +
+        `En cuanto me lo pegues, te saco cash flow, CoC, cap rate y sensibilidad.`;
 
-        if (fetched.ok) {
-          zillowContext =
-            `\n\n[ZILLOW_LISTING_HTML_SNIPPET_BEGIN]\n` +
-            fetched.html +
-            `\n[ZILLOW_LISTING_HTML_SNIPPET_END]\n`;
-        } else {
-          // Zillow bloquea muy seguido: pedimos inputs mínimos
-          const replyText =
-            `Muchacha, vi tu link de Zillow ✅\n\n` +
-            `PERO Zillow a veces bloquea que yo lo “importe” automático.\n` +
-            `Para sacarte el **deal calculator** ya mismo, pégame estos datos (copy/paste del listing):\n\n` +
-            `**Confirmado (del listing):**\n` +
-            `1) Address\n` +
-            `2) Precio\n` +
-            `3) Beds/Baths/Sqft\n` +
-            `4) Rent Zestimate (o renta esperada)\n` +
-            `5) Taxes anual\n` +
-            `6) HOA mensual (si aplica)\n` +
-            `7) Condición / rehab (si el listing dice algo)\n\n` +
-            `**Y dime esto tú:**\n` +
-            `- ¿Down payment %? (si no sabes, dime 20% o 25%)\n` +
-            `- ¿Interest rate estimado? (si no sabes, dime 7.5% por ahora)\n\n` +
-            `Ojo con esto: en cuanto me pegues eso, te lo saco con cash flow, CoC, cap rate y sensibilidad.`;
-
-          return json({ reply: { role: "assistant", content: replyText } }, 200);
-        }
-      } catch (_e) {
-        const replyText =
-          `Muchacha, vi tu link de Zillow ✅\n\n` +
-          `Pero no pude importarlo automático (Zillow se pone intenso).\n` +
-          `Pégame estos datos y te saco el **deal calculator**:\n\n` +
-          `1) Address\n2) Precio\n3) Beds/Baths/Sqft\n4) Rent Zestimate\n5) Taxes anual\n6) HOA mensual\n7) Rehab/condición\n\n` +
-          `+ Down payment % y tasa estimada.`;
-
-        return json({ reply: { role: "assistant", content: replyText } }, 200);
-      }
+      return json({ reply: { role: "assistant", content: replyText } }, 200);
     }
 
-    // Armamos mensajes para el modelo
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...userMessages,
-    ];
-
-    // Si sí pudimos traer HTML, lo metemos como contexto extra (sin inventar datos)
-    if (zillowContext) {
-      messages.push({
-        role: "system",
-        content:
-          "Contexto extra del listing (best effort). Úsalo solo si aporta. " +
-          "NO inventes números. Si un dato no está claro, pídeselo al usuario." +
-          zillowContext,
-      });
-    }
-
-    // Validación mínima
     if (!client.apiKey) {
-      return json(
-        { error: "Falta la variable OPENAI_API_KEY en Vercel" },
-        500
-      );
+      return json({ error: "Falta la variable OPENAI_API_KEY en Vercel" }, 500);
     }
+
+    const messages = [{ role: "system", content: systemPrompt }, ...userMessages];
 
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
     });
 
-    const reply = completion.choices[0]?.message ?? {
-      role: "assistant",
-      content: "No recibí respuesta del modelo.",
-    };
+    const reply =
+      completion.choices[0]?.message ?? {
+        role: "assistant",
+        content: "No recibí respuesta del modelo.",
+      };
 
     return json({ reply }, 200);
   } catch (error) {
     console.error("ERROR EN /api/chat:", error);
 
-    // Manejo especial de quota (429)
-    const maybeStatus = error?.status || error?.code;
-    if (maybeStatus === 429 || error?.message?.includes("insufficient_quota")) {
+    if (error?.status === 429 || String(error?.message || "").includes("quota")) {
       return json(
         {
           error:
-            "Muchacha, tu cuenta de OpenAI está sin cuota/billing ahora mismo (429). Revisa Billing en OpenAI y vuelve a probar.",
+            "Muchacha, OpenAI te está devolviendo 429 (sin cuota/billing). Revisa Billing y vuelve a probar.",
         },
         429
       );
